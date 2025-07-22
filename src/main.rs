@@ -12,7 +12,19 @@ use crossterm::{
 };
 use std::{io, error::Error};
 
-const SCOPES: &[&str] = &["auth", "api", "ui", "db", "docs"];
+const SCOPES: &[(&str, &str)] = &[
+    ("feat", "A new feature"),
+    ("fix", "A bug fix"),
+    ("docs", "Documentation only changes"),
+    ("style", "Code style changes (formatting, etc)"),
+    ("refactor", "Code change that neither fixes a bug nor adds a feature"),
+    ("perf", "Performance improvements"),
+    ("test", "Adding or correcting tests"),
+    ("build", "Build system or dependency changes"),
+    ("ci", "CI configuration changes"),
+    ("chore", "Other changes that don't modify src or test files"),
+    ("revert", "Revert a previous commit"),
+];
 
 enum Step {
     Scope,
