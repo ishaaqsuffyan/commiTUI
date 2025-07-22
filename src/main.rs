@@ -27,8 +27,8 @@ const COMMIT_TYPES: &[(&str, &str)] = &[
 ];
 
 const SCOPES: &[&str] = &[
-    "no scope",
-    // Most common
+    "no scope", // <-- Add this at the top
+    // Most common (docs removed)
     "core",
     "api",
     "ui",
@@ -64,7 +64,7 @@ enum Step {
     Scope,
     Subject,
     Body,
-    Breaking, // NEW
+    Breaking,
     Preview,
 }
 
@@ -115,7 +115,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut in_body = false;
 
     // Breaking changes input
-    let mut breaking = String::new(); // NEW
+    let mut breaking = String::new();
 
     // State machine
     let mut step = Step::Type;
@@ -215,7 +215,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .wrap(Wrap { trim: false });
                     f.render_widget(paragraph, size);
                 }
-                Step::Breaking => { // NEW
+                Step::Breaking => {
                     let block = Block::default()
                         .title("Enter Breaking Changes (optional, Enter to confirm, Esc/Ctrl+C to quit)")
                         .borders(Borders::ALL)
@@ -233,18 +233,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let type_str = chosen_type.as_deref().unwrap_or("");
                     let scope_str = chosen_scope.as_deref().unwrap_or("");
                     let mut preview = String::new();
-                    if !type_str.is_empty() {
-                        preview.push_str(type_str);
+
+                    // Only include scope if not "no scope" and not empty
+                    if chosen_scope.is_none() || scope_str.is_empty() {
+                        preview = format!("{}: {}", type_str, subject);
+                    } else {
+                        preview = format!("{}({}): {}", type_str, scope_str, subject);
                     }
-                    if !scope_str.is_empty() {
-                        preview.push('(');
-                        preview.push_str(scope_str);
-                        preview.push(')');
-                    }
-                    if !type_str.is_empty() || !scope_str.is_empty() {
-                        preview.push_str(": ");
-                    }
-                    preview.push_str(&subject);
+
                     let mut full_preview = preview.clone();
                     if !body_lines.is_empty() || !body.is_empty() {
                         full_preview.push_str("\n\n");
@@ -349,7 +345,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                     KeyCode::Enter => {
                                         if is_scope_selectable(selected_scope) {
-                                            chosen_scope = Some(SCOPES[selected_scope].to_string());
+                                            if selected_scope == 0 {
+                                                // "no scope" selected
+                                                chosen_scope = None;
+                                            } else {
+                                                chosen_scope = Some(SCOPES[selected_scope].to_string());
+                                            }
                                             step = Step::Subject;
                                         }
                                     }
@@ -386,7 +387,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 KeyCode::Enter => {
                                     if body.is_empty() {
                                         // Empty line: finish body input
-                                        step = Step::Breaking; // Go to breaking changes step
+                                        step = Step::Breaking;
                                     } else {
                                         body_lines.push(body.clone());
                                         body.clear();
@@ -401,7 +402,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 _ => {}
                             }
                         }
-                        Step::Breaking => { // NEW
+                        Step::Breaking => {
                             if (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
                                 || key.code == KeyCode::Esc
                             {
@@ -459,12 +460,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Print the result
     println!("---\nResult:");
     if let Some(ty) = chosen_type {
-        print!("{}", ty);
+        if chosen_scope.is_none() || chosen_scope.as_deref().unwrap_or("").is_empty() {
+            print!("{}: {}", ty, subject);
+        } else {
+            print!("{}({}): {}", ty, chosen_scope.as_deref().unwrap(), subject);
+        }
     }
-    if let Some(scope) = chosen_scope {
-        print!("({})", scope);
-    }
-    print!(": {}", subject);
     if !body_lines.is_empty() || !body.is_empty() {
         println!();
         for line in &body_lines {
