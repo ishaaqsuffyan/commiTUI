@@ -117,6 +117,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Breaking changes input
     let mut breaking = String::new();
 
+    // Issue references input
+    let mut issues = String::new();
+    let mut focus_issues = false;
+
     // State machine
     let mut step = Step::Type;
 
@@ -226,15 +230,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     f.render_widget(paragraph, size);
                 }
                 Step::Preview => {
-                    let block = Block::default()
-                        .title("Preview Commit Message (y/Enter to confirm, b to go back, Esc/Ctrl+C to quit)")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Green));
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .margin(2)
+                        .constraints([
+                            Constraint::Min(5),
+                            Constraint::Length(3),
+                        ])
+                        .split(size);
+
                     let type_str = chosen_type.as_deref().unwrap_or("");
                     let scope_str = chosen_scope.as_deref().unwrap_or("");
                     let mut preview = String::new();
 
-                    // Only include scope if not "no scope" and not empty
                     if chosen_scope.is_none() || scope_str.is_empty() {
                         preview = format!("{}: {}", type_str, subject);
                     } else {
@@ -252,16 +260,38 @@ fn main() -> Result<(), Box<dyn Error>> {
                             full_preview.push_str(&body);
                         }
                     }
-                    // Add breaking changes if present
                     if !breaking.trim().is_empty() {
                         full_preview.push_str("\n\nBREAKING CHANGE: ");
                         full_preview.push_str(&breaking.trim());
                     }
+                    if !issues.trim().is_empty() {
+                        full_preview.push_str("\n\n");
+                        full_preview.push_str(&issues.trim());
+                    }
+
                     let paragraph = Paragraph::new(full_preview)
-                        .block(block)
+                        .block(Block::default()
+                            .title("Preview Commit Message (Tab to edit issues, y/Enter to confirm, b to go back, Esc/Ctrl+C to quit)")
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(Color::Green)))
                         .style(Style::default().fg(Color::Yellow))
                         .wrap(Wrap { trim: false });
-                    f.render_widget(paragraph, size);
+                    f.render_widget(paragraph, chunks[0]);
+
+                    let input_block = if focus_issues {
+                        Block::default()
+                            .title("Issue References (e.g., Closes #123, Fixes #456)")
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(Color::Green))
+                    } else {
+                        Block::default()
+                            .title("Issue References (Tab to edit, Enter to confirm)")
+                            .borders(Borders::ALL)
+                    };
+                    let issues_paragraph = Paragraph::new(issues.as_str())
+                        .block(input_block)
+                        .style(Style::default().fg(Color::Yellow));
+                    f.render_widget(issues_paragraph, chunks[1]);
                 }
             }
         })?;
@@ -427,16 +457,41 @@ fn main() -> Result<(), Box<dyn Error>> {
                             {
                                 break;
                             }
-                            match key.code {
-                                KeyCode::Char('y') | KeyCode::Enter => {
-                                    // Confirm and exit
-                                    break;
+                            if focus_issues {
+                                match key.code {
+                                    KeyCode::Tab => {
+                                        focus_issues = false;
+                                    }
+                                    KeyCode::Enter => {
+                                        // Confirm and exit
+                                        break;
+                                    }
+                                    KeyCode::Char(c) => {
+                                        issues.push(c);
+                                    }
+                                    KeyCode::Backspace => {
+                                        issues.pop();
+                                    }
+                                    KeyCode::Char('b') => {
+                                        focus_issues = false;
+                                        step = Step::Breaking;
+                                    }
+                                    _ => {}
                                 }
-                                KeyCode::Char('b') => {
-                                    // Go back to breaking changes input
-                                    step = Step::Breaking;
+                            } else {
+                                match key.code {
+                                    KeyCode::Tab => {
+                                        focus_issues = true;
+                                    }
+                                    KeyCode::Char('y') | KeyCode::Enter => {
+                                        // Confirm and exit
+                                        break;
+                                    }
+                                    KeyCode::Char('b') => {
+                                        step = Step::Breaking;
+                                    }
+                                    _ => {}
                                 }
-                                _ => {}
                             }
                         }
                     }
@@ -477,6 +532,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if !breaking.trim().is_empty() {
         println!("\nBREAKING CHANGE: {}", breaking.trim());
+    }
+    if !issues.trim().is_empty() {
+        println!("{}", issues.trim());
     }
     println!();
 
