@@ -1,7 +1,7 @@
 use ratatui::{
     backend::CrosstermBackend,
     Terminal,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     style::{Style, Color},
     layout::{Layout, Constraint, Direction},
 };
@@ -12,7 +12,7 @@ use crossterm::{
 };
 use std::{io, error::Error};
 
-const SCOPES: &[(&str, &str)] = &[
+const COMMIT_TYPES: &[(&str, &str)] = &[
     ("feat", "A new feature"),
     ("fix", "A bug fix"),
     ("docs", "Documentation only changes"),
@@ -26,9 +26,65 @@ const SCOPES: &[(&str, &str)] = &[
     ("revert", "Revert a previous commit"),
 ];
 
+const SCOPES: &[&str] = &[
+    // Most common
+    "core",
+    "api",
+    "ui",
+    "auth",
+    "db",
+    "test",
+    "build",
+    "deps",
+    "ci",
+    // Separator
+    "────────────",
+    // Lesser used
+    "config",
+    "infra",
+    "release",
+    "chore",
+    "perf",
+    "style",
+    "lint",
+    "i18n",
+    "analytics",
+    "security",
+    "logging",
+    "devops",
+    "deploy",
+    "assets",
+    "mock",
+    "example",
+];
+
 enum Step {
+    Type,
     Scope,
     Subject,
+    Body,
+    Preview,
+}
+
+fn is_scope_selectable(idx: usize) -> bool {
+    let s = SCOPES[idx];
+    !s.starts_with('─')
+}
+
+fn next_selectable_scope(mut idx: usize, dir: i32) -> usize {
+    loop {
+        let new_idx = if dir > 0 {
+            if idx + 1 >= SCOPES.len() { return idx; }
+            idx + 1
+        } else {
+            if idx == 0 { return idx; }
+            idx - 1
+        };
+        if is_scope_selectable(new_idx) {
+            return new_idx;
+        }
+        idx = new_idx;
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -38,22 +94,44 @@ fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // State for scope step
+    // Type selection
+    let mut selected_type = 0;
+    let mut chosen_type: Option<String> = None;
+
+    // Scope selection
     let mut selected_scope = 0;
     let mut custom_scope = String::new();
     let mut focus_input = false;
     let mut chosen_scope: Option<String> = None;
 
-    // State for subject step
+    // Subject input
     let mut subject = String::new();
 
+    // Body input
+    let mut body = String::new();
+    let mut body_lines: Vec<String> = vec![];
+    let mut in_body = false;
+
     // State machine
-    let mut step = Step::Scope;
+    let mut step = Step::Type;
 
     loop {
         terminal.draw(|f| {
             let size = f.size();
             match step {
+                Step::Type => {
+                    let items: Vec<ListItem> = COMMIT_TYPES
+                        .iter()
+                        .map(|(ty, desc)| ListItem::new(format!("{:<8} {}", ty, desc)))
+                        .collect();
+                    let mut state = ratatui::widgets::ListState::default();
+                    state.select(Some(selected_type));
+                    let list = List::new(items)
+                        .block(Block::default().title("Select Commit Type (Enter to confirm, q/Esc/Ctrl+C to quit)").borders(Borders::ALL))
+                        .highlight_style(Style::default().bg(Color::Blue))
+                        .highlight_symbol(">> ");
+                    f.render_stateful_widget(list, size, &mut state);
+                }
                 Step::Scope => {
                     let chunks = Layout::default()
                         .direction(Direction::Vertical)
@@ -67,7 +145,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // List of scopes
                     let items: Vec<ListItem> = SCOPES
                         .iter()
-                        .map(|s| ListItem::new(*s))
+                        .map(|s| {
+                            if s.starts_with('─') {
+                                ListItem::new(*s).style(Style::default().fg(Color::DarkGray))
+                            } else {
+                                ListItem::new(*s)
+                            }
+                        })
                         .collect();
                     let mut state = ratatui::widgets::ListState::default();
                     state.select(Some(selected_scope));
@@ -103,6 +187,66 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .style(Style::default().fg(Color::Yellow));
                     f.render_widget(paragraph, size);
                 }
+                Step::Body => {
+                    let block = Block::default()
+                        .title("Enter Body (multi-line, Enter for new line, Empty line to finish, Esc/Ctrl+C to quit)")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Green));
+                    let body_text = if body_lines.is_empty() && body.is_empty() {
+                        String::from("<empty>")
+                    } else {
+                        let mut all = body_lines.join("\n");
+                        if !body.is_empty() {
+                            if !all.is_empty() {
+                                all.push('\n');
+                            }
+                            all.push_str(&body);
+                        }
+                        all
+                    };
+                    let paragraph = Paragraph::new(body_text)
+                        .block(block)
+                        .style(Style::default().fg(Color::Yellow))
+                        .wrap(Wrap { trim: false });
+                    f.render_widget(paragraph, size);
+                }
+                Step::Preview => {
+                    let block = Block::default()
+                        .title("Preview Commit Message (y/Enter to confirm, b to go back, Esc/Ctrl+C to quit)")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Green));
+                    let type_str = chosen_type.as_deref().unwrap_or("");
+                    let scope_str = chosen_scope.as_deref().unwrap_or("");
+                    let mut preview = String::new();
+                    if !type_str.is_empty() {
+                        preview.push_str(type_str);
+                    }
+                    if !scope_str.is_empty() {
+                        preview.push('(');
+                        preview.push_str(scope_str);
+                        preview.push(')');
+                    }
+                    if !type_str.is_empty() || !scope_str.is_empty() {
+                        preview.push_str(": ");
+                    }
+                    preview.push_str(&subject);
+                    let mut full_preview = preview.clone();
+                    if !body_lines.is_empty() || !body.is_empty() {
+                        full_preview.push_str("\n\n");
+                        full_preview.push_str(&body_lines.join("\n"));
+                        if !body.is_empty() {
+                            if !body_lines.is_empty() {
+                                full_preview.push('\n');
+                            }
+                            full_preview.push_str(&body);
+                        }
+                    }
+                    let paragraph = Paragraph::new(full_preview)
+                        .block(block)
+                        .style(Style::default().fg(Color::Yellow))
+                        .wrap(Wrap { trim: false });
+                    f.render_widget(paragraph, size);
+                }
             }
         })?;
 
@@ -110,9 +254,37 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match step {
+                        Step::Type => {
+                            if (key.code == KeyCode::Char('q') && key.modifiers.is_empty())
+                                || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+                                || key.code == KeyCode::Esc
+                            {
+                                break;
+                            }
+                            match key.code {
+                                KeyCode::Down => {
+                                    let mut idx = selected_type;
+                                    if idx < COMMIT_TYPES.len() - 1 {
+                                        idx += 1;
+                                    }
+                                    selected_type = idx;
+                                }
+                                KeyCode::Up => {
+                                    let mut idx = selected_type;
+                                    if idx > 0 {
+                                        idx -= 1;
+                                    }
+                                    selected_type = idx;
+                                }
+                                KeyCode::Enter => {
+                                    chosen_type = Some(COMMIT_TYPES[selected_type].0.to_string());
+                                    step = Step::Scope;
+                                }
+                                _ => {}
+                            }
+                        }
                         Step::Scope => {
                             if focus_input {
-                                // Only Esc and Ctrl+C quit from input box
                                 if (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
                                     || key.code == KeyCode::Esc
                                 {
@@ -127,7 +299,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                                             chosen_scope = Some(custom_scope.trim().to_string());
                                             step = Step::Subject;
                                         }
-                                        // If empty, do nothing
                                     }
                                     KeyCode::Char(c) => {
                                         custom_scope.push(c);
@@ -138,7 +309,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     _ => {}
                                 }
                             } else {
-                                // In list: q, Esc, or Ctrl+C quit
                                 if (key.code == KeyCode::Char('q') && key.modifiers.is_empty())
                                     || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
                                     || key.code == KeyCode::Esc
@@ -150,25 +320,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         focus_input = true;
                                     }
                                     KeyCode::Down => {
-                                        if selected_scope < SCOPES.len() - 1 {
-                                            selected_scope += 1;
-                                        }
+                                        let idx = next_selectable_scope(selected_scope, 1);
+                                        selected_scope = idx;
                                     }
                                     KeyCode::Up => {
-                                        if selected_scope > 0 {
-                                            selected_scope -= 1;
-                                        }
+                                        let idx = next_selectable_scope(selected_scope, -1);
+                                        selected_scope = idx;
                                     }
                                     KeyCode::Enter => {
-                                        chosen_scope = Some(SCOPES[selected_scope].to_string());
-                                        step = Step::Subject;
+                                        if is_scope_selectable(selected_scope) {
+                                            chosen_scope = Some(SCOPES[selected_scope].to_string());
+                                            step = Step::Subject;
+                                        }
                                     }
                                     _ => {}
                                 }
                             }
                         }
                         Step::Subject => {
-                            // Esc or Ctrl+C to quit
                             if (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
                                 || key.code == KeyCode::Esc
                             {
@@ -176,8 +345,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             }
                             match key.code {
                                 KeyCode::Enter => {
-                                    // Confirm subject and exit (or go to next step)
-                                    break;
+                                    step = Step::Body;
                                 }
                                 KeyCode::Char(c) => {
                                     subject.push(c);
@@ -188,9 +356,60 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 _ => {}
                             }
                         }
+                        Step::Body => {
+                            if (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+                                || key.code == KeyCode::Esc
+                            {
+                                break;
+                            }
+                            match key.code {
+                                KeyCode::Enter => {
+                                    if body.is_empty() {
+                                        // Empty line: finish body input
+                                        step = Step::Preview;
+                                    } else {
+                                        body_lines.push(body.clone());
+                                        body.clear();
+                                    }
+                                }
+                                KeyCode::Char(c) => {
+                                    body.push(c);
+                                }
+                                KeyCode::Backspace => {
+                                    body.pop();
+                                }
+                                _ => {}
+                            }
+                        }
+                        Step::Preview => {
+                            if (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+                                || key.code == KeyCode::Esc
+                            {
+                                break;
+                            }
+                            match key.code {
+                                KeyCode::Char('y') | KeyCode::Enter => {
+                                    // Confirm and exit
+                                    break;
+                                }
+                                KeyCode::Char('b') => {
+                                    // Go back to body input
+                                    step = Step::Body;
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
             }
+        }
+        // For body input, always start with an empty line if not already in body
+        if matches!(step, Step::Body) && !in_body {
+            body.clear();
+            in_body = true;
+        }
+        if !matches!(step, Step::Body) {
+            in_body = false;
         }
     }
 
@@ -198,13 +417,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
+    // Print the result
     println!("---\nResult:");
-    if let Some(scope) = chosen_scope {
-        println!("Scope: {}", scope);
-    } else {
-        println!("No scope selected.");
+    if let Some(ty) = chosen_type {
+        print!("{}", ty);
     }
-    println!("Subject: {}", subject);
+    if let Some(scope) = chosen_scope {
+        print!("({})", scope);
+    }
+    print!(": {}", subject);
+    if !body_lines.is_empty() || !body.is_empty() {
+        println!();
+        for line in &body_lines {
+            println!("{}", line);
+        }
+        if !body.is_empty() {
+            println!("{}", body);
+        }
+    }
+    println!();
 
     Ok(())
 }
