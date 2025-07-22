@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             // Custom input
             let input_block = if focus_input {
                 Block::default()
-                    .title("Or type a custom scope (Tab to switch, Enter to confirm, q/Esc/Ctrl+C to quit)")
+                    .title("Or type a custom scope (Tab to switch, Enter to confirm, Esc/Ctrl+C to quit)")
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Green))
             } else {
@@ -71,15 +71,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    // Quit on q, Esc, or Ctrl+C
-                    if (key.code == KeyCode::Char('q') && key.modifiers.is_empty())
-                        || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
-                        || key.code == KeyCode::Esc
-                    {
-                        break;
-                    }
-
                     if focus_input {
+                        // Only Esc and Ctrl+C quit from input box
+                        if (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+                            || key.code == KeyCode::Esc
+                        {
+                            break;
+                        }
                         match key.code {
                             KeyCode::Tab => {
                                 focus_input = false;
@@ -100,6 +98,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             _ => {}
                         }
                     } else {
+                        // In list: q, Esc, or Ctrl+C quit
+                        if (key.code == KeyCode::Char('q') && key.modifiers.is_empty())
+                            || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+                            || key.code == KeyCode::Esc
+                        {
+                            break;
+                        }
                         match key.code {
                             KeyCode::Tab => {
                                 focus_input = true;
