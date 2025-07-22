@@ -211,6 +211,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .block(block)
                         .style(Style::default().fg(Color::Yellow));
                     f.render_widget(paragraph, size);
+
+                    // Validation message
+                    let validation_msg = validate_subject(&subject);
+                    if let Some(ref msg) = validation_msg {
+                        let warn = Paragraph::new(msg.as_str())
+                            .block(Block::default().borders(Borders::ALL).title("Validation Error"))
+                            .style(Style::default().fg(Color::Red));
+                        let area = Rect {
+                            x: size.x,
+                            y: size.y + size.height.saturating_sub(3),
+                            width: size.width,
+                            height: 3,
+                        };
+                        f.render_widget(warn, area);
+                    }
                 }
                 Step::Body => {
                     let block = Block::default()
@@ -293,22 +308,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .style(Style::default().fg(Color::Yellow))
                         .wrap(Wrap { trim: false });
                     f.render_widget(paragraph, chunks[0]);
-
-                    // Validation message
-                    let validation_msg = validate_subject(&subject);
-                    if let Some(ref msg) = validation_msg {
-                        let warn = Paragraph::new(msg.as_str())
-                            .block(Block::default().borders(Borders::ALL).title("Validation Error"))
-                            .style(Style::default().fg(Color::Red));
-                        // Place warning at the bottom of the preview area
-                        let area = Rect {
-                            x: chunks[0].x,
-                            y: chunks[0].y + chunks[0].height.saturating_sub(3),
-                            width: chunks[0].width,
-                            height: 3,
-                        };
-                        f.render_widget(warn, area);
-                    }
 
                     let input_block = if focus_issues {
                         Block::default()
@@ -426,9 +425,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                             {
                                 break;
                             }
+                            let validation_msg = validate_subject(&subject);
                             match key.code {
                                 KeyCode::Enter => {
-                                    step = Step::Body;
+                                    if validation_msg.is_none() {
+                                        step = Step::Body;
+                                    }
                                 }
                                 KeyCode::Char(c) => {
                                     subject.push(c);
@@ -489,16 +491,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             {
                                 break;
                             }
-                            let validation_msg = validate_subject(&subject);
                             if focus_issues {
                                 match key.code {
                                     KeyCode::Tab => {
                                         focus_issues = false;
                                     }
                                     KeyCode::Enter => {
-                                        if validation_msg.is_none() {
-                                            break;
-                                        }
+                                        break;
                                     }
                                     KeyCode::Char(c) => {
                                         issues.push(c);
@@ -518,9 +517,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         focus_issues = true;
                                     }
                                     KeyCode::Char('y') | KeyCode::Enter => {
-                                        if validation_msg.is_none() {
-                                            break;
-                                        }
+                                        break;
                                     }
                                     KeyCode::Char('b') => {
                                         step = Step::Breaking;
