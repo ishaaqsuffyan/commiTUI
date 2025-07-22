@@ -3,7 +3,7 @@ use ratatui::{
     Terminal,
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     style::{Style, Color},
-    layout::{Layout, Constraint, Direction},
+    layout::{Layout, Constraint, Direction, Rect},
 };
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -87,6 +87,22 @@ fn next_selectable_scope(mut idx: usize, dir: i32) -> usize {
         }
         idx = new_idx;
     }
+}
+
+fn validate_subject(subject: &str) -> Option<String> {
+    if subject.trim().is_empty() {
+        return Some("Subject must not be empty.".to_string());
+    }
+    if subject.len() > 72 {
+        return Some("Subject should be 72 characters or less.".to_string());
+    }
+    if subject.ends_with('.') {
+        return Some("Subject should not end with a period.".to_string());
+    }
+    if subject.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+        return Some("Subject should start with a lowercase letter.".to_string());
+    }
+    None
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -278,6 +294,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .wrap(Wrap { trim: false });
                     f.render_widget(paragraph, chunks[0]);
 
+                    // Validation message
+                    let validation_msg = validate_subject(&subject);
+                    if let Some(ref msg) = validation_msg {
+                        let warn = Paragraph::new(msg.as_str())
+                            .block(Block::default().borders(Borders::ALL).title("Validation Error"))
+                            .style(Style::default().fg(Color::Red));
+                        // Place warning at the bottom of the preview area
+                        let area = Rect {
+                            x: chunks[0].x,
+                            y: chunks[0].y + chunks[0].height.saturating_sub(3),
+                            width: chunks[0].width,
+                            height: 3,
+                        };
+                        f.render_widget(warn, area);
+                    }
+
                     let input_block = if focus_issues {
                         Block::default()
                             .title("Issue References (e.g., Closes #123, Fixes #456)")
@@ -457,14 +489,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                             {
                                 break;
                             }
+                            let validation_msg = validate_subject(&subject);
                             if focus_issues {
                                 match key.code {
                                     KeyCode::Tab => {
                                         focus_issues = false;
                                     }
                                     KeyCode::Enter => {
-                                        // Confirm and exit
-                                        break;
+                                        if validation_msg.is_none() {
+                                            break;
+                                        }
                                     }
                                     KeyCode::Char(c) => {
                                         issues.push(c);
@@ -484,8 +518,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         focus_issues = true;
                                     }
                                     KeyCode::Char('y') | KeyCode::Enter => {
-                                        // Confirm and exit
-                                        break;
+                                        if validation_msg.is_none() {
+                                            break;
+                                        }
                                     }
                                     KeyCode::Char('b') => {
                                         step = Step::Breaking;
