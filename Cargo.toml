@@ -7,3 +7,5 @@ edition = "2024"
 ratatui = "0.26"
 crossterm = "0.27"
 clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
