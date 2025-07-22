@@ -27,6 +27,7 @@ const COMMIT_TYPES: &[(&str, &str)] = &[
 ];
 
 const SCOPES: &[&str] = &[
+    "no scope",
     // Most common
     "core",
     "api",
@@ -63,6 +64,7 @@ enum Step {
     Scope,
     Subject,
     Body,
+    Breaking, // NEW
     Preview,
 }
 
@@ -111,6 +113,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut body = String::new();
     let mut body_lines: Vec<String> = vec![];
     let mut in_body = false;
+
+    // Breaking changes input
+    let mut breaking = String::new(); // NEW
 
     // State machine
     let mut step = Step::Type;
@@ -210,6 +215,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .wrap(Wrap { trim: false });
                     f.render_widget(paragraph, size);
                 }
+                Step::Breaking => { // NEW
+                    let block = Block::default()
+                        .title("Enter Breaking Changes (optional, Enter to confirm, Esc/Ctrl+C to quit)")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Red));
+                    let paragraph = Paragraph::new(breaking.as_str())
+                        .block(block)
+                        .style(Style::default().fg(Color::Red));
+                    f.render_widget(paragraph, size);
+                }
                 Step::Preview => {
                     let block = Block::default()
                         .title("Preview Commit Message (y/Enter to confirm, b to go back, Esc/Ctrl+C to quit)")
@@ -240,6 +255,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             }
                             full_preview.push_str(&body);
                         }
+                    }
+                    // Add breaking changes if present
+                    if !breaking.trim().is_empty() {
+                        full_preview.push_str("\n\nBREAKING CHANGE: ");
+                        full_preview.push_str(&breaking.trim());
                     }
                     let paragraph = Paragraph::new(full_preview)
                         .block(block)
@@ -366,7 +386,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 KeyCode::Enter => {
                                     if body.is_empty() {
                                         // Empty line: finish body input
-                                        step = Step::Preview;
+                                        step = Step::Breaking; // Go to breaking changes step
                                     } else {
                                         body_lines.push(body.clone());
                                         body.clear();
@@ -377,6 +397,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 }
                                 KeyCode::Backspace => {
                                     body.pop();
+                                }
+                                _ => {}
+                            }
+                        }
+                        Step::Breaking => { // NEW
+                            if (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+                                || key.code == KeyCode::Esc
+                            {
+                                break;
+                            }
+                            match key.code {
+                                KeyCode::Enter => {
+                                    step = Step::Preview;
+                                }
+                                KeyCode::Char(c) => {
+                                    breaking.push(c);
+                                }
+                                KeyCode::Backspace => {
+                                    breaking.pop();
                                 }
                                 _ => {}
                             }
@@ -393,8 +432,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     break;
                                 }
                                 KeyCode::Char('b') => {
-                                    // Go back to body input
-                                    step = Step::Body;
+                                    // Go back to breaking changes input
+                                    step = Step::Breaking;
                                 }
                                 _ => {}
                             }
@@ -434,6 +473,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         if !body.is_empty() {
             println!("{}", body);
         }
+    }
+    if !breaking.trim().is_empty() {
+        println!("\nBREAKING CHANGE: {}", breaking.trim());
     }
     println!();
 
