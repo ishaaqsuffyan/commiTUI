@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::state::{AppState, Step};
-use crate::validation::validate_subject;
+use crate::validation::validate_subject; // Import validate_subject
 use ratatui::{
     backend::CrosstermBackend,
     Terminal,
@@ -65,9 +65,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
         chosen_scope: None,
 
         subject: String::new(),
-        // For Subject, Body, Breaking, Issues, we'll use state.focus_input to mean "is this text input active?"
-        // This makes focus_input a re-used flag for "is a text field currently being typed into" for the active step.
-
+        
         body: String::new(),
         body_lines: vec![],
         in_body: false, // Special flag for multi-line body
@@ -174,7 +172,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                         .style(Style::default().fg(Color::Yellow));
                     f.render_widget(paragraph, area); // Use `area` for rendering
 
-                    let validation_msg = validate_subject(&state.subject);
+                    let validation_msg = validate_subject(&state.subject, &config); // Pass config here
                     if let Some(ref msg) = validation_msg {
                         let warn = Paragraph::new(msg.as_str())
                             .block(Block::default().borders(Borders::ALL).title("Validation Error"))
@@ -268,12 +266,16 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                     if !state.breaking.trim().is_empty() {
                         if !full_preview.is_empty() && !full_preview.ends_with("\n\n") {
                             full_preview.push_str("\n\n");
+                        } else if full_preview.is_empty() { // If breaking is first content after subject line
+                            full_preview.push('\n');
                         }
                         full_preview.push_str(&format!("BREAKING CHANGE: {}", state.breaking.trim()));
                     }
                     if !state.issues.trim().is_empty() {
                         if !full_preview.is_empty() && !full_preview.ends_with("\n\n") {
                             full_preview.push_str("\n\n");
+                        } else if full_preview.is_empty() { // If issues is first content after subject line
+                            full_preview.push('\n');
                         }
                         full_preview.push_str(&state.issues.trim());
                     }
@@ -394,8 +396,9 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                             }
                         }
                         Step::Subject => {
+                            // `q` for quit is handled globally
                             if state.focus_input { // Subject input focused
-                                let validation_msg = validate_subject(&state.subject);
+                                let validation_msg = validate_subject(&state.subject, &config); // Pass config here
                                 match key.code {
                                     KeyCode::Tab => {
                                         state.focus_input = false; // Switch to navigation mode for subject
@@ -429,7 +432,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                                     }
                                     KeyCode::Enter => {
                                         // If enter is pressed in nav mode, it should still move forward if valid.
-                                        if validate_subject(&state.subject).is_none() {
+                                        if validate_subject(&state.subject, &config).is_none() { // Pass config here
                                             state.step = Step::Body;
                                             state.focus_input = true;
                                             state.in_body = false;
@@ -440,6 +443,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                             }
                         }
                         Step::Body => {
+                            // `q` for quit is handled globally
                             if state.focus_input { // Body input focused
                                 match key.code {
                                     KeyCode::Tab => {
@@ -481,6 +485,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                             }
                         }
                         Step::Breaking => {
+                            // `q` for quit is handled globally
                             if state.focus_input { // Breaking changes input focused
                                 match key.code {
                                     KeyCode::Tab => {
@@ -516,6 +521,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                             }
                         }
                         Step::Preview => {
+                            // `q` for quit is handled globally
                             if state.focus_issues { // Issues input focused
                                 match key.code {
                                     KeyCode::Tab => {
@@ -570,6 +576,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
         }
     }
 
+    // Restore terminal before returning
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -583,43 +590,54 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
             result = format!("{}({}): {}", ty, state.chosen_scope.as_deref().unwrap(), state.subject);
         }
     }
+    
+    // Append body if not empty
     if !state.body_lines.is_empty() || !state.body.is_empty() {
-        result.push('\n'); // Add newline after subject line
+        if !result.is_empty() && !result.ends_with('\n') { // Ensure newline after subject if not already
+            result.push('\n'); 
+        }
+        // Ensure two newlines after subject/header for body
+        if !result.ends_with("\n\n") {
+             result.push_str("\n\n");
+        }
+
         for (i, line) in state.body_lines.iter().enumerate() {
-            if i > 0 || !result.ends_with('\n') {
+            if i > 0 { // Don't add newline before the very first line if already starting on one
                 result.push('\n');
             }
             result.push_str(line);
         }
         if !state.body.is_empty() {
-            if !result.ends_with('\n') { // Ensure newline if body_lines had content
+            if !state.body_lines.is_empty() { // Only add newline if there were previous body lines
                 result.push('\n');
             }
             result.push_str(&state.body);
         }
     }
     
-    // Ensure two newlines before optional footers if there's content before them
+    // Append footers (breaking changes, issues)
     let mut has_previous_content = !state.body_lines.is_empty() || !state.body.is_empty();
-    if !has_previous_content && (!result.is_empty() && result != "\n") { // If only subject and no body
+    if !has_previous_content && !result.is_empty() && result != "\n" { // Check if subject line exists
         has_previous_content = true;
     }
 
     if !state.breaking.trim().is_empty() {
-        if has_previous_content && !result.ends_with("\n\n") {
-            result.push_str("\n\n");
-        } else if !has_previous_content && !result.ends_with('\n') { // If breaking is first after subject line
-            result.push('\n');
+        if has_previous_content {
+            if !result.ends_with("\n\n") { result.push_str("\n\n"); }
+        } else {
+             if !result.is_empty() && !result.ends_with('\n') { result.push('\n'); }
+             if !result.ends_with("\n\n") { result.push('\n'); } // Single newline after subject if no body
         }
         result.push_str(&format!("BREAKING CHANGE: {}", state.breaking.trim()));
         has_previous_content = true; // Mark that content was added
     }
     
     if !state.issues.trim().is_empty() {
-        if has_previous_content && !result.ends_with("\n\n") {
-            result.push_str("\n\n");
-        } else if !has_previous_content && !result.ends_with('\n') { // If issues is first after subject line
-            result.push('\n');
+        if has_previous_content {
+            if !result.ends_with("\n\n") { result.push_str("\n\n"); }
+        } else {
+             if !result.is_empty() && !result.ends_with('\n') { result.push('\n'); }
+             if !result.ends_with("\n\n") { result.push('\n'); } // Single newline after subject if no body or breaking
         }
         result.push_str(&state.issues.trim());
     }
