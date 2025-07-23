@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::state::{AppState, Step};
-use crate::validation::validate_subject; // Import validate_subject
+use crate::validation::validate_subject;
 use ratatui::{
     backend::CrosstermBackend,
     Terminal,
@@ -15,21 +15,21 @@ use crossterm::{
 };
 use std::io;
 
-fn is_scope_selectable(scopes: &[String], idx: usize) -> bool {
-    let s = &scopes[idx];
+fn is_scope_selectable(scopes_slice: &[String], idx: usize) -> bool {
+    let s = &scopes_slice[idx];
     !s.starts_with('─')
 }
 
-fn next_selectable_scope(scopes: &[String], mut idx: usize, dir: i32) -> usize {
+fn next_selectable_scope(scopes_slice: &[String], mut idx: usize, dir: i32) -> usize {
     loop {
         let new_idx = if dir > 0 {
-            if idx + 1 >= scopes.len() { return idx; }
+            if idx + 1 >= scopes_slice.len() { return idx; }
             idx + 1
         } else {
             if idx == 0 { return idx; }
             idx - 1
         };
-        if is_scope_selectable(scopes, new_idx) {
+        if is_scope_selectable(scopes_slice, new_idx) {
             return new_idx;
         }
         idx = new_idx;
@@ -79,6 +79,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
     let total_steps = 6;
 
     loop {
+        // --- DRAWING ---
         terminal.draw(|f| {
             let size = f.size();
             let progress = format!(
@@ -101,9 +102,11 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
 
             match state.step {
                 Step::Type => {
-                    let items: Vec<ListItem> = config.types
+                    // Get types slice, defaulting to empty if config.types is None
+                    let types_slice = config.types.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                    let items: Vec<ListItem> = types_slice
                         .iter()
-                        .map(|ty| ListItem::new(ty.clone()))
+                        .map(|ty| ListItem::new(ty.as_str())) // ty is &String, as_str() makes &str
                         .collect();
                     let mut list_state = ratatui::widgets::ListState::default();
                     list_state.select(Some(state.selected_type));
@@ -114,21 +117,25 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                     f.render_stateful_widget(list, area, &mut list_state);
                 }
                 Step::Scope => {
+                    // Get scopes slice, defaulting to empty if config.scopes is None
+                    let scopes_slice = config.scopes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                    
                     let chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
-                            Constraint::Length(config.scopes.len() as u16 + 2),
+                            // Use the actual length of the slice or 0 if None
+                            Constraint::Length(scopes_slice.len() as u16 + 2), 
                             Constraint::Length(3),
                         ])
-                        .split(area); // Use `area` for splitting
+                        .split(area);
 
-                    let items: Vec<ListItem> = config.scopes
+                    let items: Vec<ListItem> = scopes_slice
                         .iter()
                         .map(|s| {
                             if s.starts_with('─') {
-                                ListItem::new(s.clone()).style(Style::default().fg(Color::DarkGray))
+                                ListItem::new(s.as_str()).style(Style::default().fg(Color::DarkGray)) // s is &String, as_str() makes &str
                             } else {
-                                ListItem::new(s.clone())
+                                ListItem::new(s.as_str()) // s is &String, as_str() makes &str
                             }
                         })
                         .collect();
@@ -210,7 +217,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                         }
                         all
                     };
-                    let paragraph = Paragraph::new(body_text)
+                    let paragraph = Paragraph::new(body_text.as_str()) // Use as_str() here
                         .block(block)
                         .style(Style::default().fg(Color::Yellow))
                         .wrap(Wrap { trim: false });
@@ -253,34 +260,40 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                     }
 
                     let mut full_preview = preview.clone();
+                    // Body
                     if !state.body_lines.is_empty() || !state.body.is_empty() {
-                        full_preview.push_str("\n\n");
+                        full_preview.push_str("\n\n"); // Ensure 2 newlines after subject line
                         full_preview.push_str(&state.body_lines.join("\n"));
                         if !state.body.is_empty() {
-                            if !full_preview.is_empty() && !full_preview.ends_with('\n') {
+                            if !state.body_lines.is_empty() { // Add newline if there were previous body lines
                                 full_preview.push('\n');
                             }
                             full_preview.push_str(&state.body);
                         }
                     }
+                    // Breaking Change
                     if !state.breaking.trim().is_empty() {
-                        if !full_preview.is_empty() && !full_preview.ends_with("\n\n") {
+                        // Ensure two newlines before if previous content
+                        if full_preview.ends_with('\n') && !full_preview.ends_with("\n\n") {
+                            full_preview.push('\n'); // Add one more to make it two
+                        } else if !full_preview.is_empty() {
                             full_preview.push_str("\n\n");
-                        } else if full_preview.is_empty() { // If breaking is first content after subject line
-                            full_preview.push('\n');
                         }
                         full_preview.push_str(&format!("BREAKING CHANGE: {}", state.breaking.trim()));
                     }
+                    // Issues
                     if !state.issues.trim().is_empty() {
-                        if !full_preview.is_empty() && !full_preview.ends_with("\n\n") {
+                        // Ensure two newlines before if previous content
+                        if full_preview.ends_with('\n') && !full_preview.ends_with("\n\n") {
+                            full_preview.push('\n'); // Add one more to make it two
+                        } else if !full_preview.is_empty() {
                             full_preview.push_str("\n\n");
-                        } else if full_preview.is_empty() { // If issues is first content after subject line
-                            full_preview.push('\n');
                         }
                         full_preview.push_str(&state.issues.trim());
                     }
 
-                    let paragraph = Paragraph::new(full_preview)
+
+                    let paragraph = Paragraph::new(full_preview.as_str()) // Use as_str() here
                         .block(Block::default()
                             .title("Preview Commit Message (Tab to edit issues, y/Enter to confirm, b/Left to go back, Esc/Ctrl+C to quit)")
                             .borders(Borders::ALL)
@@ -307,6 +320,7 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
             }
         })?;
 
+        // --- EVENT HANDLING ---
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
@@ -323,15 +337,21 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                             if key.code == KeyCode::Char('q') && key.modifiers.is_empty() {
                                 break;
                             }
+                            // Type selection doesn't have a separate "input mode"
                             match key.code {
                                 KeyCode::Down => {
-                                    state.selected_type = (state.selected_type + 1).min(config.types.len() - 1);
+                                    // Use .map_or(0, |v| v.len()) to get length safely from Option<Vec<String>>
+                                    let types_len = config.types.as_ref().map_or(0, |v| v.len());
+                                    state.selected_type = (state.selected_type + 1).min(types_len.saturating_sub(1));
                                 }
                                 KeyCode::Up => {
                                     state.selected_type = state.selected_type.saturating_sub(1);
                                 }
                                 KeyCode::Enter => {
-                                    state.chosen_type = Some(config.types[state.selected_type].clone());
+                                    // Make sure config.types is Some before indexing
+                                    if let Some(types_vec) = config.types.as_ref() {
+                                        state.chosen_type = Some(types_vec[state.selected_type].clone());
+                                    }
                                     state.step = Step::Scope;
                                     state.focus_input = false; // Start scope list focused
                                 }
@@ -339,6 +359,8 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                             }
                         }
                         Step::Scope => {
+                            let scopes_slice = config.scopes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+
                             if state.focus_input { // Custom scope input focused
                                 match key.code {
                                     KeyCode::Tab => {
@@ -371,17 +393,17 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                                         state.focus_input = true; // Switch to custom input
                                     }
                                     KeyCode::Down => {
-                                        state.selected_scope = next_selectable_scope(&config.scopes, state.selected_scope, 1);
+                                        state.selected_scope = next_selectable_scope(scopes_slice, state.selected_scope, 1);
                                     }
                                     KeyCode::Up => {
-                                        state.selected_scope = next_selectable_scope(&config.scopes, state.selected_scope, -1);
+                                        state.selected_scope = next_selectable_scope(scopes_slice, state.selected_scope, -1);
                                     }
                                     KeyCode::Enter => {
-                                        if is_scope_selectable(&config.scopes, state.selected_scope) {
-                                            if state.selected_scope == 0 { // "no scope" selected
+                                        if is_scope_selectable(scopes_slice, state.selected_scope) {
+                                            if state.selected_scope == 0 { // "no scope" selected (always at index 0 in default)
                                                 state.chosen_scope = None;
                                             } else {
-                                                state.chosen_scope = Some(config.scopes[state.selected_scope].clone());
+                                                state.chosen_scope = Some(scopes_slice[state.selected_scope].clone());
                                             }
                                             state.step = Step::Subject;
                                             state.focus_input = true; // Start subject input focused
@@ -389,7 +411,10 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                                     }
                                     KeyCode::Char('b') | KeyCode::Left => {
                                         state.step = Step::Type;
-                                        state.selected_type = config.types.iter().position(|t| Some(t) == state.chosen_type.as_ref()).unwrap_or(0);
+                                        // Restore selected_type based on chosen_type for back nav
+                                        state.selected_type = config.types.as_ref()
+                                            .and_then(|types_vec| types_vec.iter().position(|t| Some(t) == state.chosen_type.as_ref()))
+                                            .unwrap_or(0);
                                     }
                                     _ => {}
                                 }
@@ -426,8 +451,9 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
                                     KeyCode::Char('b') | KeyCode::Left => {
                                         state.step = Step::Scope;
                                         // Restore state for scope
-                                        state.focus_input = state.chosen_scope.is_some() && !config.scopes.contains(state.chosen_scope.as_ref().unwrap());
-                                        state.selected_scope = config.scopes.iter().position(|s| Some(s) == state.chosen_scope.as_ref()).unwrap_or(0);
+                                        let scopes_vec = config.scopes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                                        state.focus_input = state.chosen_scope.is_some() && !scopes_vec.contains(state.chosen_scope.as_ref().unwrap_or(&String::new()));
+                                        state.selected_scope = scopes_vec.iter().position(|s| Some(s) == state.chosen_scope.as_ref()).unwrap_or(0);
                                         state.custom_scope = state.chosen_scope.clone().unwrap_or_default();
                                     }
                                     KeyCode::Enter => {
@@ -616,28 +642,26 @@ pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
     }
     
     // Append footers (breaking changes, issues)
-    let mut has_previous_content = !state.body_lines.is_empty() || !state.body.is_empty();
-    if !has_previous_content && !result.is_empty() && result != "\n" { // Check if subject line exists
-        has_previous_content = true;
-    }
+    // Check if there was any content (subject + optional body) before footers
+    let has_previous_content = !result.trim().is_empty(); // Trim to account for leading newlines
 
     if !state.breaking.trim().is_empty() {
         if has_previous_content {
             if !result.ends_with("\n\n") { result.push_str("\n\n"); }
         } else {
-             if !result.is_empty() && !result.ends_with('\n') { result.push('\n'); }
-             if !result.ends_with("\n\n") { result.push('\n'); } // Single newline after subject if no body
+             // If breaking change is the first non-subject content, ensure 2 newlines from subject
+             if !result.ends_with("\n\n") { result.push_str("\n\n"); }
         }
         result.push_str(&format!("BREAKING CHANGE: {}", state.breaking.trim()));
-        has_previous_content = true; // Mark that content was added
     }
     
     if !state.issues.trim().is_empty() {
-        if has_previous_content {
-            if !result.ends_with("\n\n") { result.push_str("\n\n"); }
-        } else {
-             if !result.is_empty() && !result.ends_with('\n') { result.push('\n'); }
-             if !result.ends_with("\n\n") { result.push('\n'); } // Single newline after subject if no body or breaking
+        // If issues is the first non-subject content, ensure 2 newlines from subject
+        // Or if there was breaking change, ensure 2 newlines.
+        if !result.is_empty() && !result.ends_with("\n\n") {
+            result.push_str("\n\n");
+        } else if result.is_empty() { // This means the message is entirely empty until issues
+             // Do nothing special, issues will be the first line
         }
         result.push_str(&state.issues.trim());
     }
