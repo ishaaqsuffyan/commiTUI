@@ -36,7 +36,7 @@ fn next_selectable_scope(scopes: &[String], mut idx: usize, dir: i32) -> usize {
     }
 }
 
-pub fn run_tui(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_tui(config: Config) -> Result<String, Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -463,31 +463,31 @@ pub fn run_tui(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    // Print the result
-    println!("---\nResult:");
+    // Build the commit message string:
+    let mut result = String::new();
     if let Some(ty) = state.chosen_type {
         if state.chosen_scope.is_none() || state.chosen_scope.as_deref().unwrap_or("").is_empty() {
-            print!("{}: {}", ty, state.subject);
+            result = format!("{}: {}", ty, state.subject);
         } else {
-            print!("{}({}): {}", ty, state.chosen_scope.as_deref().unwrap(), state.subject);
+            result = format!("{}({}): {}", ty, state.chosen_scope.as_deref().unwrap(), state.subject);
         }
     }
     if !state.body_lines.is_empty() || !state.body.is_empty() {
-        println!();
+        result.push('\n');
         for line in &state.body_lines {
-            println!("{}", line);
+            result.push_str(&format!("\n{}", line));
         }
         if !state.body.is_empty() {
-            println!("{}", state.body);
+            result.push_str(&format!("\n{}", state.body));
         }
     }
     if !state.breaking.trim().is_empty() {
-        println!("\nBREAKING CHANGE: {}", state.breaking.trim());
+        result.push_str(&format!("\n\nBREAKING CHANGE: {}", state.breaking.trim()));
     }
     if !state.issues.trim().is_empty() {
-        println!("{}", state.issues.trim());
+        result.push_str(&format!("\n\n{}", state.issues.trim()));
     }
-    println!();
+    result.push('\n');
 
-    Ok(())
+    Ok(result)
 }
